@@ -34,6 +34,26 @@ const embeddedPayload = $('#embedded-payload');
 const namespace = `noux:${baseURL.pathname}`;
 let game = null, state = null, view = 'welcome', secret = null, adminUnlocked = false, lastFocus = null, toastTimer = null, saveProblem = false, offlineReady = false, dialogBusy = false, unlocking = false;
 let reducedMotion = storage.get(`${namespace}:motion`) === 'reduced';
+const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const movingCards = new Set();
+const motionTimers = new WeakMap();
+const reduceMotion = () => reducedMotion || Boolean(motionPreference?.matches);
+const canAnimate = () => !reduceMotion() && !document.hidden;
+// Motion belongs to the gesture, never to the saved game or a background render.
+function embellish(element, name) {
+  if (!element || !canAnimate()) return;
+  const timers = motionTimers.get(element) || new Map();
+  motionTimers.set(element,timers);
+  clearTimeout(timers.get(name));
+  element.classList.add(name);
+  timers.set(name,setTimeout(() => { element.classList.remove(name); timers.delete(name); },1200));
+}
+function animatePage(moment = 'page') { embellish($('#main'), `moment-${moment}`); }
+function animateDebt() {
+  document.querySelectorAll('.debt-chip,.debt-display').forEach(element => embellish(element,'moment-debt'));
+}
+function stopMovingCards() { for (const animation of movingCards) animation.cancel(); movingCards.clear(); }
+motionPreference?.addEventListener?.('change', () => { if (reduceMotion()) stopMovingCards(); });
 const stateKey = () => `${namespace}:state:${game.id}:${game.releaseMode}`;
 const now = () => Date.now() + (game?.releaseMode === 'rehearsal' ? (state?.testOffset ?? 0) : 0);
 const activeChapter = () => game.chapters[state.ledger.activeIndex];
@@ -53,7 +73,18 @@ function action(type, fields = {}) {
   if (!outcome.result.ok) notice(({ COOLDOWN:'Un peu de patience : le prochain indice arrive bientôt.', INACTIVE_PUZZLE:'Cette énigme n’est pas active.', HUNT_NOT_FINISHED:'Il reste encore un chapitre à découvrir.', DINNER_NOT_CONFIRMED:'Le règlement s’ouvre après le restaurant.', EXCEEDS_DEBT:'Cette combinaison dépasse ton ardoise.', INVALID_SEQUENCE:'Vérifie l’heure du téléphone avant de continuer.' })[outcome.result.code] ?? 'Cette action n’est pas disponible pour le moment.');
   return outcome.result;
 }
-function setView(next, scroll = true) { view = next; render(); if (scroll) { const y = innerWidth <= 760 && next !== 'welcome' ? 73 : 0; window.scrollTo({ top:y, behavior:reducedMotion ? 'instant' : 'smooth' }); } $('#main')?.focus({ preventScroll:true }); }
+function setView(next, scroll = true, moment = 'page') {
+  view = next; render();
+  if (scroll) {
+    const y = innerWidth <= 760 && next !== 'welcome'
+      ? next === 'letter' ? Math.max(0,$('#main').getBoundingClientRect().top + scrollY - 24) : 73
+      : 0;
+    // Arrive at the page before the flourish, so it never plays off screen.
+    window.scrollTo({top:y,behavior:'instant'});
+  }
+  if (moment) animatePage(moment);
+  $('#main')?.focus({preventScroll:true});
+}
 function mapLink(place, text = 'Ouvrir l’itinéraire') {
   if (!place?.mapQuery && !place?.address) return '';
   const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.mapQuery || place.address)}`;
@@ -61,6 +92,7 @@ function mapLink(place, text = 'Ouvrir l’itinéraire') {
 }
 function openDialog(title, html) {
   lastFocus = document.activeElement;
+  $('#dialog-content').classList.remove('moment-pouch');
   $('#dialog-content').innerHTML = `<div class="dialog-head"><span class="eyebrow">NOUX · Les heures retrouvées</span><button class="dialog-close" data-action="close-dialog" aria-label="Fermer">${icon('close')}</button></div><h2 id="dialog-title">${esc(title)}</h2>${html}`;
   dialogBusy = false;
   if (!dialog.open) dialog.showModal();
@@ -79,6 +111,7 @@ function nav(mobile = false) {
   return `<nav class="${mobile ? 'mobile-nav' : 'desktop-nav'}" aria-label="${mobile ? 'Navigation mobile' : 'Navigation principale'}">${navItems.map(([id, glyph, name]) => `<button class="nav-button ${view === id ? 'active' : ''}" data-view="${id}" ${view === id ? 'aria-current="page"' : ''}>${icon(glyph)}<span>${name}</span></button>`).join('')}</nav>`;
 }
 function render() {
+  stopMovingCards();
   document.body.className = `view-${view}${reducedMotion ? ' reduce-motion' : ''}`;
   const body = !game ? lockedView() : ({welcome:welcomeView,game:gameView,inventory:inventoryView,wallet:walletView,music:musicView,settings:settingsView,regie:regieView,letter:letterView}[view] ?? welcomeView)();
   app.innerHTML = `<header class="topbar"><button class="brand-button" data-view="welcome" aria-label="Revenir à l’invitation">${crossPrint}<span class="brand-lockup"><span class="wordmark">NOUX</span><span class="brand-colophon">Les heures retrouvées</span></span></button><div class="topbar-right">${game?.releaseMode === 'rehearsal' ? '<span class="subtle-badge">Avant-première</span>' : '<span class="topbar-date">Les heures retrouvées</span>'}${game ? `<button class="debt-chip" data-view="wallet" aria-label="Ardoise : ${remainingDebt(state.ledger)} bisous dus">${icon('heart')}<b>${remainingDebt(state.ledger)}</b><span>bisous</span></button><button class="icon-button" data-view="settings" aria-label="Ouvrir le menu">${icon('settings')}</button>` : ''}</div></header><div class="layout">${cover()}<div class="main-wrap">${nav()}<main class="content" id="main" tabindex="-1">${body}</main><footer class="page-footer"><span>À garder, comme un souvenir.</span>${game ? '<button data-action="regie">Régie</button>' : '<span>Une page après l’autre.</span>'}</footer></div></div>${nav(true)}`;
@@ -111,7 +144,7 @@ function translationView(c,p) {
 }
 function successView(c) {
   const items = game.inventory.filter(i => c.rewards.includes(i.id));
-  return `<span class="eyebrow">Chapitre ${String(c.number).padStart(2,'0')} · retrouvé</span><div class="success-icon">${icon('check')}</div><h2>${esc(c.success.title)}</h2><p class="lead">${esc(c.success.text)}</p>${items.map(i => `<div class="reward-row">${icon(i.type === 'pouch' ? 'envelope' : 'sparkle')}<div><span class="micro">Dans ton inventaire</span><p>${esc(i.title)}</p></div></div>`).join('')}${c.success.destination ? `<div class="destination-card"><span class="eyebrow">La prochaine porte</span><h3>${esc(c.success.destination.name)}</h3><p>${esc(c.success.destination.address)}</p>${mapLink(c.success.destination)}</div>` : ''}${c.id === 'c12' ? `<div class="button-row">${btn('Lire la lettre','show-letter','secondary')}</div>` : ''}<div class="button-row">${btn(`${c.id === 'c13' ? 'Garder ces heures' : 'Poursuivre mon histoire'} ${icon('arrow')}`,'continue','wide')}</div>`;
+  return `<span class="eyebrow">Chapitre ${String(c.number).padStart(2,'0')} · retrouvé</span><div class="success-icon"><svg class="success-trace" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37" pathLength="1"/></svg>${icon('check').replace('<path ', '<path pathLength="1" ')}</div><h2>${esc(c.success.title)}</h2><p class="lead">${esc(c.success.text)}</p>${items.map(i => `<div class="reward-row">${icon(i.type === 'pouch' ? 'envelope' : 'sparkle')}<div><span class="micro">Dans ton inventaire</span><p>${esc(i.title)}</p></div></div>`).join('')}${c.success.destination ? `<div class="destination-card"><span class="eyebrow">La prochaine porte</span><h3>${esc(c.success.destination.name)}</h3><p>${esc(c.success.destination.address)}</p>${mapLink(c.success.destination)}</div>` : ''}${c.id === 'c12' ? `<div class="button-row">${btn('Lire la lettre','show-letter','secondary')}</div>` : ''}<div class="button-row">${btn(`${c.id === 'c13' ? 'Garder ces heures' : 'Poursuivre mon histoire'} ${icon('arrow')}`,'continue','wide')}</div>`;
 }
 function finishedView() {
   return `<span class="eyebrow">Les treize chapitres sont à toi</span><h2>Le temps retrouvé.<br><em>Et tout le reste à vivre.</em></h2><p class="lead">Le carnet se referme. La soirée continue.</p><p>Tu peux retrouver ici tes pochettes, les mots glissés dans cette journée et l’ardoise de bisous. Son règlement s’ouvrira après le restaurant.</p>${photoView()}<div class="button-row">${btn('Relire la lettre','show-letter','secondary')}${btn('Mon ardoise','wallet-view','secondary')}</div>${timelineView()}`;
@@ -128,7 +161,7 @@ function sortingTool() {
   const pouches = game.inventory.filter(i => i.type === 'pouch' && i.memoryText && acquired().has(i.id));
   if (pouches.length !== 7) return '';
   const order = state.sortOrder.length === 7 && state.sortOrder.every(id => pouches.some(p => p.id === id)) ? state.sortOrder : pouches.map(p => p.id);
-  return `<div class="pouch-sort" aria-label="Classer les sept souvenirs">${order.map((id,index) => { const p = pouches.find(i => i.id === id); return `<div class="sort-card"><span class="roman">${esc(p.seal)}</span><p>${esc(p.memoryText)}</p><div class="sort-controls"><button data-action="sort-up" data-id="${esc(id)}" aria-label="Monter la pochette ${esc(p.seal)}" ${index === 0 ? 'disabled' : ''}>${icon('up')}</button><button data-action="sort-down" data-id="${esc(id)}" aria-label="Descendre la pochette ${esc(p.seal)}" ${index === 6 ? 'disabled' : ''}>${icon('down')}</button></div></div>`; }).join('')}</div><div class="assembled-letters" aria-label="Les lettres dans cet ordre">${order.map(id => esc(pouches.find(p => p.id === id).letter)).join('')}</div>`;
+  return `<div class="pouch-sort" aria-label="Classer les sept souvenirs">${order.map((id,index) => { const p = pouches.find(i => i.id === id); return `<div class="sort-card" data-sort-id="${esc(id)}"><span class="roman">${esc(p.seal)}</span><p>${esc(p.memoryText)}</p><div class="sort-controls"><button data-action="sort-up" data-id="${esc(id)}" aria-label="Monter la pochette ${esc(p.seal)}" ${index === 0 ? 'disabled' : ''}>${icon('up')}</button><button data-action="sort-down" data-id="${esc(id)}" aria-label="Descendre la pochette ${esc(p.seal)}" ${index === 6 ? 'disabled' : ''}>${icon('down')}</button></div></div>`; }).join('')}</div><div class="assembled-letters" aria-label="Les lettres dans cet ordre">${order.map(id => esc(pouches.find(p => p.id === id).letter)).join('')}</div>`;
 }
 function walletView() {
   const debt = remainingDebt(state.ledger), open = state.ledger.settlementOpenedAt !== null;
@@ -167,12 +200,12 @@ function updateClock() {
 }
 function completeChapter() {
   const c = activeChapter(); if (!c) return;
-  if (action('completePuzzle',{puzzleId:c.id}).ok) { state.pendingSuccess = c.id; persist(); setView('game'); $('#live').textContent = c.success.title; }
+  if (action('completePuzzle',{puzzleId:c.id}).ok) { state.pendingSuccess = c.id; persist(); setView('game',true,'success'); $('#live').textContent = c.success.title; }
 }
 // The drawing stays intact. Only its existing SVG rings turn, once the key works.
 async function playInvitationUnlock() {
   const artwork = $('.cover-art');
-  if (!artwork || reducedMotion || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || document.hidden) return;
+  if (!artwork || !canAnimate()) return;
   try {
     const bounds = artwork.getBoundingClientRect();
     if (bounds.top < 0 || bounds.bottom > innerHeight) artwork.scrollIntoView?.({ behavior:'smooth', block:'center' });
@@ -222,7 +255,7 @@ async function unlock(value, remember = false, { animate = true } = {}) {
     try { storage.set(`${namespace}:session-invitation`,key,true); if (remember) storage.set(`${namespace}:invitation`,key); } catch { notice('Garde ton invitation pour pouvoir rouvrir le carnet.'); }
     persist();
     if (animate) await playInvitationUnlock();
-    view = state.entered ? 'game' : 'welcome'; render(); prepareOffline();
+    view = state.entered ? 'game' : 'welcome'; render(); if (animate) animatePage(); prepareOffline();
     $('#live').textContent = 'Ton invitation est ouverte.';
   } catch (e) { game = null; secret = null; view = 'welcome'; render(); const err = $('#unlock-error'); if (err) err.textContent = e.message || 'Ce code ne permet pas d’ouvrir l’invitation.'; }
   finally {
@@ -246,11 +279,11 @@ document.addEventListener('click', async event => {
   if (name === 'close-dialog') { closeDialog(); return; }
   if (!game) return;
   if (name === 'enter') { state.entered = true; persist(); setView('game'); }
-  else if (name === 'start') { if (action('startPuzzle',{puzzleId:activeChapter().id}).ok) render(); }
+  else if (name === 'start') { if (action('startPuzzle',{puzzleId:activeChapter().id}).ok) { render(); animatePage(); } }
   else if (name === 'continue') { state.pendingSuccess = null; persist(); setView('game'); }
   else if (name === 'back-to-game') setView('game');
   else if (name === 'wallet-view') setView('wallet');
-  else if (name === 'show-letter') { if (isComplete('c12')) setView('letter'); }
+  else if (name === 'show-letter') { if (isComplete('c12')) setView('letter',true,'letter'); }
   else if (name === 'manual-confirm') confirmation('Une page se tourne', 'Cette étape est-elle terminée ? Prends le temps de profiter de ce qui t’attend avant de continuer.', 'manual-complete', 'Oui, poursuivre');
   else if (name === 'manual-complete') { closeDialog(); completeChapter(); }
   else if (name === 'hint') {
@@ -258,7 +291,7 @@ document.addEventListener('click', async event => {
     if (p.hints.some(h => h.level === level)) openDialog(`Indice ${level}`,`<p>${esc(c.hints[level-1])}</p><p class="fine-print">Déjà acquis. Aucun bisou supplémentaire.</p>${btn('Revenir à l’énigme','close-dialog','wide')}`);
     else confirmation(`Un indice, une promesse`, `Cet indice ajoute ${HINT_PRICES[level-1]} ${HINT_PRICES[level-1] === 1 ? 'bisou' : 'bisous'} à ton ardoise. Elle passera à ${remainingDebt(state.ledger)+HINT_PRICES[level-1]} bisous à régler après le dîner.`, 'buy-hint', `Ajouter ${HINT_PRICES[level-1]} ${HINT_PRICES[level-1] === 1 ? 'bisou' : 'bisous'}`, `data-level="${level}"`);
   }
-  else if (name === 'buy-hint') { if (dialogBusy) return; dialogBusy = true; el.disabled = true; const c = activeChapter(), level = Number(el.dataset.level); const outcome = action('buyHint',{puzzleId:c.id,level}); closeDialog(); if (outcome.ok) { render(); notice(`Indice ${level} ouvert · +${outcome.debtAdded} ${outcome.debtAdded === 1 ? 'bisou' : 'bisous'}`); } }
+  else if (name === 'buy-hint') { if (dialogBusy) return; dialogBusy = true; el.disabled = true; const c = activeChapter(), level = Number(el.dataset.level); const outcome = action('buyHint',{puzzleId:c.id,level}); closeDialog(); if (outcome.ok) { render(); animatePage('hint'); animateDebt(); notice(`Indice ${level} ouvert · +${outcome.debtAdded} ${outcome.debtAdded === 1 ? 'bisou' : 'bisous'}`); } }
   else if (name === 'read-help') {
     const c = game.chapters.find(c => c.id === el.dataset.puzzle), p = state.ledger.puzzles.find(p => p.id === el.dataset.puzzle);
     if (!c || !p) return;
@@ -267,18 +300,36 @@ document.addEventListener('click', async event => {
     if (content) openDialog(ownHint ? `Indice ${level}` : 'Traduction', `<p>${esc(content)}</p><p class="fine-print">Déjà acquis. Aucun bisou supplémentaire.</p>${btn('Revenir à l’ardoise','close-dialog','wide')}`);
   }
   else if (name === 'translation') confirmation('Un passage entre deux langues', 'Cette traduction ajoute 1 bisou à ton ardoise. Tu pourras ensuite la relire librement.', 'buy-translation', 'Ajouter 1 bisou');
-  else if (name === 'buy-translation') { const c = activeChapter(); if (!c.translation) return; const outcome = action('buyTranslation',{puzzleId:c.id,translationId:c.translation.id}); closeDialog(); if (outcome.ok) render(); }
+  else if (name === 'buy-translation') { const c = activeChapter(); if (!c.translation) return; const outcome = action('buyTranslation',{puzzleId:c.id,translationId:c.translation.id}); closeDialog(); if (outcome.ok) { render(); animatePage('translation'); animateDebt(); } }
   else if (name === 'inventory-item') {
     const item = game.inventory.find(i => i.id === el.dataset.id); if (!item || !acquired().has(item.id)) return;
     const open = item.type !== 'pouch' || isComplete('c10');
-    openDialog(item.title,`${item.type === 'pouch' && !open ? `${icon('lock')}<p>Cette pochette attend son moment. Garde-la près de toi ; un message te dira quand l’ouvrir.</p>` : `<p>${esc(item.description)}</p>${item.memoryText ? `<p class="lead">${esc(item.memoryText)}</p><span class="pouch-letter">${esc(item.letter)}</span>` : ''}`}${btn('La garder avec moi','close-dialog','wide')}`);
+    const reveal = item.type === 'pouch' && open && item.memoryText;
+    const envelope = reveal ? `<div class="pouch-unseal" aria-hidden="true"><span class="pouch-paper"></span><span class="pouch-flap"></span><span class="pouch-seal">${esc(item.seal)}</span></div>` : '';
+    openDialog(item.title,`${envelope}${item.type === 'pouch' && !open ? `${icon('lock')}<p>Cette pochette attend son moment. Garde-la près de toi ; un message te dira quand l’ouvrir.</p>` : `<p>${esc(item.description)}</p>${item.memoryText ? `<p class="lead">${esc(item.memoryText)}</p><span class="pouch-letter">${esc(item.letter)}</span>` : ''}`}${btn('La garder avec moi','close-dialog','wide')}`);
+    if (reveal) embellish($('#dialog-content'),'moment-pouch');
   }
   else if (name === 'sort-up' || name === 'sort-down') {
     const pouches = game.inventory.filter(i => i.type === 'pouch' && i.memoryText && acquired().has(i.id));
     const order = state.sortOrder.length === 7 ? [...state.sortOrder] : pouches.map(p => p.id);
     const from = order.indexOf(el.dataset.id), to = from + (name === 'sort-up' ? -1 : 1);
     if (from < 0 || to < 0 || to >= order.length) return;
-    [order[from],order[to]] = [order[to],order[from]]; state.sortOrder = order; persist(); const scroll = scrollY; render(); window.scrollTo(0,scroll);
+    const positions = new Map([...document.querySelectorAll('[data-sort-id]')].map(card => [card.dataset.sortId,card.getBoundingClientRect().top]));
+    [order[from],order[to]] = [order[to],order[from]]; state.sortOrder = order; persist(); const scroll = scrollY; render(); window.scrollTo({top:scroll,behavior:'instant'});
+    // Keep keyboard focus with the souvenir, including at either end of the list.
+    const moved = [...document.querySelectorAll('[data-sort-id]')].find(card => card.dataset.sortId === el.dataset.id);
+    const preferred = moved?.querySelector(`[data-action="${name}"]:not(:disabled)`);
+    (preferred || moved?.querySelector('button:not(:disabled)'))?.focus({preventScroll:true});
+    if (canAnimate()) {
+      document.querySelectorAll('[data-sort-id]').forEach(card => {
+        const before = positions.get(card.dataset.sortId), delta = before - card.getBoundingClientRect().top;
+        if (!Number.isFinite(delta) || Math.abs(delta) < 1 || !card.animate) return;
+        const animation = card.animate([{transform:`translateY(${delta}px)`},{transform:'translateY(0)'}],{duration:260,easing:'cubic-bezier(.2,.7,.2,1)'});
+        movingCards.add(animation);
+        animation.onfinish = animation.oncancel = () => movingCards.delete(animation);
+      });
+      embellish($('.assembled-letters'),'moment-order');
+    }
   }
   else if (name === 'vigenere') {
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -294,7 +345,7 @@ document.addEventListener('click', async event => {
   else if (name === 'time-forward' && adminUnlocked && game.releaseMode === 'rehearsal') { state.testOffset += 180000; persist(); render(); notice('Horloge de répétition avancée de trois minutes.'); }
   else if (name === 'dinner-confirm' && adminUnlocked) confirmation('La soirée continue', 'Confirme que le dîner est terminé pour ouvrir le règlement de l’ardoise.', 'open-settlement', 'Le dîner est terminé');
   else if (name === 'open-settlement' && adminUnlocked) { const result = action('openSettlement',{dinnerFinished:true}); closeDialog(); if (result.ok) setView('wallet'); }
-  else if (name === 'settle') { if (dialogBusy) return; dialogBusy = true; el.disabled = true; const result = action('settleDebt',{kind:el.dataset.kind,quantity:Number(el.dataset.quantity),confirmed:true}); closeDialog(); if (result.ok) { render(); notice('Une promesse inscrite, un peu de l’ardoise réglée.'); } }
+  else if (name === 'settle') { if (dialogBusy) return; dialogBusy = true; el.disabled = true; const result = action('settleDebt',{kind:el.dataset.kind,quantity:Number(el.dataset.quantity),confirmed:true}); closeDialog(); if (result.ok) { render(); animateDebt(); notice('Une promesse inscrite, un peu de l’ardoise réglée.'); } }
   else if (name === 'fulfill-voucher') confirmation('Un joli rendez-vous de plus', 'Confirme que tous les dîners de ce bon ont eu lieu. Aucun bisou ne sera décompté une seconde fois.', 'fulfill-voucher-confirm', 'Ce bon a été honoré',`data-id="${esc(el.dataset.id)}"`);
   else if (name === 'fulfill-voucher-confirm') { const result = action('fulfillDinnerVoucher',{settlementId:el.dataset.id,confirmed:true}); closeDialog(); if (result.ok) render(); }
   else if (name === 'export' || name === 'export-unreadable') {
@@ -330,7 +381,7 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('input',event=>{ if (event.target.id === 'wish-note' && state) { state.notes = event.target.value; persist(); $('#note-status').textContent = saveProblem ? 'Sauvegarde indisponible : garde cet onglet ouvert.' : 'Tes mots sont conservés sur ce téléphone.'; } });
 document.addEventListener('change',async event=>{
-  if (event.target.id === 'motion-toggle') { reducedMotion=event.target.checked; try { storage.set(`${namespace}:motion`,reducedMotion?'reduced':'normal'); } catch {} render(); }
+  if (event.target.id === 'motion-toggle') { reducedMotion=event.target.checked; if (reducedMotion) stopMovingCards(); try { storage.set(`${namespace}:motion`,reducedMotion?'reduced':'normal'); } catch {} render(); }
   else if (event.target.id === 'remember-toggle') { try { if(event.target.checked) storage.set(`${namespace}:invitation`,secret); else storage.remove(`${namespace}:invitation`); notice(event.target.checked?'Ton invitation est conservée sur ce téléphone.':'Ton lien d’invitation permettra de rouvrir le carnet.'); } catch { event.target.checked=false; notice('Ce téléphone ne peut pas conserver ton invitation.'); } }
   else if (event.target.id === 'import-file') {
     const file=event.target.files[0];if(!file)return;
@@ -341,7 +392,7 @@ document.addEventListener('change',async event=>{
 window.addEventListener('online',()=>{notice('La connexion est revenue.');prepareOffline();});
 window.addEventListener('offline',()=>notice('Le carnet reste ouvert. Profite du chemin.'));
 window.addEventListener('storage',event=>{if(game && event.key===stateKey() && event.newValue){try{const next=validateGameState(JSON.parse(event.newValue),game);if(next.updatedAt>state.updatedAt){state=next;render();}}catch{}}});
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')updateClock();});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')updateClock();else stopMovingCards();});
 navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='CACHE_READY'){offlineReady=true;if(view==='settings')render();}});
 dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)closeDialog();}});
 setInterval(updateClock,1000);
