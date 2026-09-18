@@ -1,4 +1,4 @@
-const CACHE = `noux-listener14-v6:${self.registration.scope}`;
+const CACHE = `noux-listener14-v7:${self.registration.scope}`;
 const CORE = ['index.html','app.mjs','print-marks.mjs','game-state.mjs','bisous-wallet.mjs','crypto.mjs','style.css','fonts.css','mark.svg','manifest.webmanifest','fonts/le-murmure.woff2','fonts/basteleur-moonlight.woff2','fonts/karrik-regular.woff2','fonts/karrik-italic.woff2','fonts/director-regular.woff2','fonts/naskh.ttf'];
 const urlFor = name => new URL(name,self.registration.scope).href;
 self.addEventListener('install',event=>event.waitUntil((async()=>{

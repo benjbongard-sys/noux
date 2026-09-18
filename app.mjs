@@ -223,10 +223,35 @@ async function playInvitationUnlock() {
       document.addEventListener('visibilitychange', onVisibility);
       artwork.classList.add('is-unlocking');
       // Also finish if CSS motion is disabled or the element is replaced.
-      timer = setTimeout(finish, 1750);
+      timer = setTimeout(finish, 3500);
     });
   } catch { /* A visual flourish must never prevent a valid invitation opening. */ }
   finally { artwork.classList.remove('is-unlocking'); }
+}
+
+function revealUnlockedName() {
+  const artwork = $('.cover-art'), core = artwork?.querySelector('.orbit-core'), name = core?.querySelector('.arabic-name');
+  if (!name || !canAnimate()) return;
+  const star = document.createElement('span');
+  star.className = 'unlock-star';
+  star.setAttribute('aria-hidden','true');
+  star.innerHTML = icon('sparkle');
+  let timer;
+  const finish = () => {
+    clearTimeout(timer);
+    name.removeEventListener('animationend', onEnd);
+    document.removeEventListener('visibilitychange', onVisibility);
+    star.remove();
+    artwork.classList.remove('is-revealing');
+  };
+  const onEnd = event => { if (event.animationName === 'invitation-name-in') finish(); };
+  const onVisibility = () => { if (document.hidden) finish(); };
+  name.addEventListener('animationend',onEnd);
+  document.addEventListener('visibilitychange',onVisibility);
+  core.append(star);
+  artwork.classList.add('is-revealing');
+  // The name stays in place; only the decorative star dissolves over it.
+  timer = setTimeout(finish,1200);
 }
 
 async function unlock(value, remember = false, { animate = true } = {}) {
@@ -255,7 +280,9 @@ async function unlock(value, remember = false, { animate = true } = {}) {
     try { storage.set(`${namespace}:session-invitation`,key,true); if (remember) storage.set(`${namespace}:invitation`,key); } catch { notice('Garde ton invitation pour pouvoir rouvrir le carnet.'); }
     persist();
     if (animate) await playInvitationUnlock();
-    view = state.entered ? 'game' : 'welcome'; render(); if (animate) animatePage(); prepareOffline();
+    view = state.entered ? 'game' : 'welcome'; render();
+    if (animate) { animatePage(); revealUnlockedName(); }
+    prepareOffline();
     $('#live').textContent = 'Ton invitation est ouverte.';
   } catch (e) { game = null; secret = null; view = 'welcome'; render(); const err = $('#unlock-error'); if (err) err.textContent = e.message || 'Ce code ne permet pas d’ouvrir l’invitation.'; }
   finally {

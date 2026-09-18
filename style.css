@@ -32,11 +32,11 @@
 
 /* One mechanical opening. Never transform .orbit: it positions the mobile logo. */
 .dial-ticks,.dial-lines,.dial-accent,.dial-nodes{transform-box:view-box;transform-origin:50% 50%}
-.cover-art.is-unlocking .dial-ticks{animation:invitation-unlock-ticks 1450ms 150ms both}
-.cover-art.is-unlocking .dial-lines{animation:invitation-unlock-lines 1450ms 150ms both}
-.cover-art.is-unlocking .dial-nodes{animation:invitation-unlock-nodes 1450ms 150ms both}
-.cover-art.is-unlocking .dial-accent{animation:invitation-unlock-accent 1450ms 150ms both}
-.cover-art.is-unlocking .orbit-core{animation:invitation-unlock-light 1450ms 150ms both}
+.cover-art.is-unlocking .dial-ticks{animation:invitation-unlock-ticks 2900ms 300ms both}
+.cover-art.is-unlocking .dial-lines{animation:invitation-unlock-lines 2900ms 300ms both}
+.cover-art.is-unlocking .dial-nodes{animation:invitation-unlock-nodes 2900ms 300ms both}
+.cover-art.is-unlocking .dial-accent{animation:invitation-unlock-accent 2900ms 300ms both}
+.cover-art.is-unlocking .orbit-core{animation:invitation-unlock-light 2900ms 300ms both}
 @keyframes invitation-unlock-ticks{
   0%{transform:rotate(0deg);animation-timing-function:ease-in-out}
   18%{transform:rotate(-8deg);animation-timing-function:cubic-bezier(.22,.7,.22,1)}
@@ -74,6 +74,13 @@
 }
 .orbit-core{width:124px;height:124px;box-shadow:7px 14px 24px #160c234a,inset -4px -4px 16px #e1cde65c}
 .arabic-name,.orbit-core .icon{transform:none}
+/* Keep the silver sphere still while its star dissolves into Lyna's name. */
+.unlock-star{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0}
+.cover-art.is-revealing .unlock-star{animation:invitation-star-out 1000ms ease-in-out both}
+.cover-art.is-revealing .arabic-name{animation:invitation-name-in 1000ms ease-in-out both}
+@keyframes invitation-star-out{from{opacity:1}to{opacity:0}}
+@keyframes invitation-name-in{from{opacity:0}to{opacity:1}}
+
 .cover-art-caption{color:#cab7d5;font-size:8px;letter-spacing:2.5px;text-transform:uppercase;line-height:1.5;margin-top:3px}
 .cover-footer-line{border-top-color:#d9c6e435}
 .print-corners{position:absolute;inset:8px;display:block;pointer-events:none;color:#9b80a8;z-index:1}
