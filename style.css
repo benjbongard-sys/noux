@@ -29,6 +29,49 @@
 .dial-lines{stroke:currentColor;stroke-width:.75;opacity:.65}
 .dial-accent{stroke:#ba95cd;stroke-width:3;opacity:.8}
 .dial-nodes{stroke:#e9e1ef;stroke-width:.85}.dial-nodes circle{fill:#e9e1ef;stroke:none}
+
+/* One mechanical opening. Never transform .orbit: it positions the mobile logo. */
+.dial-ticks,.dial-lines,.dial-accent,.dial-nodes{transform-box:view-box;transform-origin:50% 50%}
+.cover-art.is-unlocking .dial-ticks{animation:invitation-unlock-ticks 1450ms 150ms both}
+.cover-art.is-unlocking .dial-lines{animation:invitation-unlock-lines 1450ms 150ms both}
+.cover-art.is-unlocking .dial-nodes{animation:invitation-unlock-nodes 1450ms 150ms both}
+.cover-art.is-unlocking .dial-accent{animation:invitation-unlock-accent 1450ms 150ms both}
+.cover-art.is-unlocking .orbit-core{animation:invitation-unlock-light 1450ms 150ms both}
+@keyframes invitation-unlock-ticks{
+  0%{transform:rotate(0deg);animation-timing-function:ease-in-out}
+  18%{transform:rotate(-8deg);animation-timing-function:cubic-bezier(.22,.7,.22,1)}
+  52%,62%{transform:rotate(36deg);animation-timing-function:cubic-bezier(.5,0,.2,1)}
+  84%{transform:rotate(-2deg);animation-timing-function:ease-out}
+  100%{transform:rotate(0deg)}
+}
+@keyframes invitation-unlock-lines{
+  0%{transform:rotate(0deg);animation-timing-function:ease-in-out}
+  22%{transform:rotate(4deg);animation-timing-function:cubic-bezier(.22,.7,.22,1)}
+  56%,64%{transform:rotate(-14deg);animation-timing-function:cubic-bezier(.5,0,.2,1)}
+  86%{transform:rotate(1deg);animation-timing-function:ease-out}
+  100%{transform:rotate(0deg)}
+}
+@keyframes invitation-unlock-nodes{
+  0%{transform:rotate(0deg);animation-timing-function:ease-in-out}
+  22%{transform:rotate(-4deg);animation-timing-function:cubic-bezier(.22,.7,.22,1)}
+  56%,64%{transform:rotate(18deg);animation-timing-function:cubic-bezier(.5,0,.2,1)}
+  86%{transform:rotate(-1deg);animation-timing-function:ease-out}
+  100%{transform:rotate(0deg)}
+}
+@keyframes invitation-unlock-accent{
+  0%{transform:rotate(0deg);opacity:.8;animation-timing-function:ease-in-out}
+  18%{transform:rotate(9deg);opacity:.8;animation-timing-function:cubic-bezier(.22,.7,.22,1)}
+  52%,62%{transform:rotate(-32deg);opacity:1;animation-timing-function:cubic-bezier(.5,0,.2,1)}
+  84%{transform:rotate(2deg);opacity:1;animation-timing-function:ease-out}
+  100%{transform:rotate(0deg);opacity:.8}
+}
+@keyframes invitation-unlock-light{
+  0%,45%,100%{filter:brightness(1)}
+  65%{filter:brightness(1.13)}
+}
+@media(prefers-reduced-motion:reduce){
+  .cover-art.is-unlocking *{animation:none!important}
+}
 .orbit-core{width:124px;height:124px;box-shadow:7px 14px 24px #160c234a,inset -4px -4px 16px #e1cde65c}
 .arabic-name,.orbit-core .icon{transform:none}
 .cover-art-caption{color:#cab7d5;font-size:8px;letter-spacing:2.5px;text-transform:uppercase;line-height:1.5;margin-top:3px}

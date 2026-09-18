@@ -32,7 +32,7 @@ const storage = { get(key, session = false) { try { return (session ? sessionSto
 const baseURL = new URL('./', location.href);
 const embeddedPayload = $('#embedded-payload');
 const namespace = `noux:${baseURL.pathname}`;
-let game = null, state = null, view = 'welcome', secret = null, adminUnlocked = false, lastFocus = null, toastTimer = null, saveProblem = false, offlineReady = false, dialogBusy = false;
+let game = null, state = null, view = 'welcome', secret = null, adminUnlocked = false, lastFocus = null, toastTimer = null, saveProblem = false, offlineReady = false, dialogBusy = false, unlocking = false;
 let reducedMotion = storage.get(`${namespace}:motion`) === 'reduced';
 const stateKey = () => `${namespace}:state:${game.id}:${game.releaseMode}`;
 const now = () => Date.now() + (game?.releaseMode === 'rehearsal' ? (state?.testOffset ?? 0) : 0);
@@ -169,7 +169,38 @@ function completeChapter() {
   const c = activeChapter(); if (!c) return;
   if (action('completePuzzle',{puzzleId:c.id}).ok) { state.pendingSuccess = c.id; persist(); setView('game'); $('#live').textContent = c.success.title; }
 }
-async function unlock(value, remember = false) {
+// The drawing stays intact. Only its existing SVG rings turn, once the key works.
+async function playInvitationUnlock() {
+  const artwork = $('.cover-art');
+  if (!artwork || reducedMotion || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || document.hidden) return;
+  try {
+    const bounds = artwork.getBoundingClientRect();
+    if (bounds.top < 0 || bounds.bottom > innerHeight) artwork.scrollIntoView?.({ behavior:'smooth', block:'center' });
+    await new Promise(resolve => {
+      let timer;
+      const finish = () => {
+        clearTimeout(timer);
+        artwork.removeEventListener('animationend', onEnd);
+        document.removeEventListener('visibilitychange', onVisibility);
+        resolve();
+      };
+      const onEnd = event => { if (event.animationName === 'invitation-unlock-accent') finish(); };
+      const onVisibility = () => { if (document.hidden) finish(); };
+      artwork.addEventListener('animationend', onEnd);
+      document.addEventListener('visibilitychange', onVisibility);
+      artwork.classList.add('is-unlocking');
+      // Also finish if CSS motion is disabled or the element is replaced.
+      timer = setTimeout(finish, 1750);
+    });
+  } catch { /* A visual flourish must never prevent a valid invitation opening. */ }
+  finally { artwork.classList.remove('is-unlocking'); }
+}
+
+async function unlock(value, remember = false, { animate = true } = {}) {
+  if (unlocking) return;
+  unlocking = true;
+  app.inert = true;
+  app.setAttribute('aria-busy','true');
   const error = $('#unlock-error');
   if (error) error.textContent = '';
   const submit = $('#unlock-form button[type="submit"]'); if (submit) { submit.disabled = true; submit.textContent = 'L’enveloppe s’ouvre…'; }
@@ -189,8 +220,17 @@ async function unlock(value, remember = false) {
     try { state = raw ? validateGameState(JSON.parse(raw),game) : newGameState(game); }
     catch { state = newGameState(game); notice('Une sauvegarde ne peut pas être lue. La copie précédente est conservée dans le menu de restauration.'); if (raw) { try { storage.set(`${stateKey()}:unreadable`,raw); } catch {} } }
     try { storage.set(`${namespace}:session-invitation`,key,true); if (remember) storage.set(`${namespace}:invitation`,key); } catch { notice('Garde ton invitation pour pouvoir rouvrir le carnet.'); }
-    persist(); view = state.entered ? 'game' : 'welcome'; render(); prepareOffline();
+    persist();
+    if (animate) await playInvitationUnlock();
+    view = state.entered ? 'game' : 'welcome'; render(); prepareOffline();
+    $('#live').textContent = 'Ton invitation est ouverte.';
   } catch (e) { game = null; secret = null; view = 'welcome'; render(); const err = $('#unlock-error'); if (err) err.textContent = e.message || 'Ce code ne permet pas d’ouvrir l’invitation.'; }
+  finally {
+    unlocking = false;
+    app.inert = false;
+    app.removeAttribute('aria-busy');
+    $(game ? '#main' : '#invite-key')?.focus({ preventScroll:true });
+  }
 }
 async function prepareOffline() {
   if (embeddedPayload) { offlineReady = true; return; }
@@ -307,7 +347,9 @@ dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog
 setInterval(updateClock,1000);
 
 const params = new URLSearchParams(location.hash.slice(1));
-const invitation = params.get('cle') || storage.get(`${namespace}:session-invitation`,true) || storage.get(`${namespace}:invitation`);
+const linkedInvitation = params.get('cle');
+const invitation = linkedInvitation || storage.get(`${namespace}:session-invitation`,true) || storage.get(`${namespace}:invitation`);
 if (params.has('cle')) history.replaceState(null,'',location.pathname+location.search);
 render();
-if(invitation) unlock(invitation,false);
+// An explicit invitation gets the opening; automatic resume stays immediate.
+if(invitation) unlock(invitation,false,{animate:Boolean(linkedInvitation)});
